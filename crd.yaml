@@ -1,0 +1,54 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: mysqls.dbaas.shamim.dev
+spec:
+  scope: Namespaced
+  group: dbaas.shamim.dev
+  names:
+    kind: MySQL
+    plural: mysqls
+    singular: mysql
+    shortNames:
+      - my
+      - mys
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                resources:
+                  type: object
+                  properties:
+                    memory:
+                      type: string
+                    cpu:
+                      type: string
+                    storage:
+                      type: string
+                config:
+                  type: object 
+                  nullable: true
+                  properties:
+                    max_connections:
+                      type: integer
+                      nullable: true
+                nodeSelector:
+                  type: object
+                  nullable: true
+                tolerations:
+                  type: array
+                  items:
+                    type: object
+                image:
+                  type: string
+                  nullable: true
+                secretName:
+                  type: string
+                  nullable: true

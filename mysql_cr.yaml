@@ -1,0 +1,20 @@
+apiVersion: dbaas.shamim.dev/v1
+kind: MySQL
+metadata:
+  name: my-mysql7
+  namespace: default
+spec:
+  resources:
+    storage: 1Gi
+    cpu: 100m
+    memory: 1Gi
+  image: hub.hamdocker.ir/mysql:8.0
+  secretName: mysql-root-secret
+  config: 
+    max_connections: 200
+  # nodeSelector:
+  #   disktype: ssd
+  # tolerations:
+  #   - key: "example-key"
+  #     operator: "Exists"
+  #     effect: "NoSchedule"
