@@ -1,0 +1,11 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mysql-operator-clusterrole
+rules:
+- apiGroups: ["dbaas.shamim.dev"]
+  resources: ["mysqls"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""] # for interacting with core resources like configmaps, secrets, services, etc.
+  resources: ["pods", "services", "persistentvolumeclaims", "configmaps", "secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

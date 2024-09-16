@@ -1,7 +1,7 @@
 apiVersion: dbaas.shamim.dev/v1
 kind: MySQL
 metadata:
-  name: my-mysql7
+  name: my-mysql0
   namespace: default
 spec:
   resources:
@@ -10,8 +10,8 @@ spec:
     memory: 1Gi
   image: hub.hamdocker.ir/mysql:8.0
   secretName: mysql-root-secret
-  config: 
-    max_connections: 200
+  # config: 
+  #   max_connections: 200
   # nodeSelector:
   #   disktype: ssd
   # tolerations:
