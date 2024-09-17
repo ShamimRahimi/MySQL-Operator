@@ -52,3 +52,6 @@ spec:
                 secretName:
                   type: string
                   nullable: true
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true

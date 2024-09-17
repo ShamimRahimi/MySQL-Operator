@@ -14,20 +14,13 @@ spec:
       labels:
         app: mysql-operator
     spec:
+      serviceAccountName: mysql-operator-sa
       containers:
       - name: mysql-operator
-        image: registry.hamdocker.ir/shamim/mysql-operator:1.4
+        image: registry.hamdocker.ir/shamim/mysql-operator:1.9
         imagePullPolicy: Always
-        env:
-        - name: KUBERNETES_SERVICE_HOST
-          value: "kubernetes.default.svc"
-        - name: KUBERNETES_SERVICE_PORT
-          value: "443"
-        - name: NAMESPACE
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
-        
+        ports:
+        - containerPort: 8080
+      
       imagePullSecrets:
       - name: my-registry-secret
-

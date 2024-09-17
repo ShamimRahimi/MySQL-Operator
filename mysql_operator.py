@@ -17,50 +17,60 @@ except k8s_config.ConfigException:
     logger.info("Loaded local kubeconfig")
 
 @kopf.on.create('dbaas.shamim.dev', 'v1', 'mysqls')
-def create_mysql(spec, **kwargs):
+def create_mysql(spec, body, namespace, **kwargs):
     name = kwargs['name']
     secret_name = spec.get('secretName') 
     config = spec.get('config', {})
 
+    # configmap
     if config:
-        create_mysql_configmap(name, config)
+        create_mysql_configmap(name, config, body)
 
-    create_mysql_pvc(name, spec)
+    # pvc
+    create_mysql_pvc(name, spec, body)
+
+    # sts
     statefulset = create_mysql_statefulset(name, spec, secret_name, config)
     apps_v1 = k8s.AppsV1Api()
+    kopf.adopt(statefulset, owner=body)
     try:
         apps_v1.create_namespaced_stateful_set(namespace="default", body=statefulset)
     except ApiException as e:
         logger.error(f"Failed to create StatefulSet: {e}")
 
-    service = create_mysql_service(name)
+    # svc 
+    service = create_mysql_service(name, body)
     v1 = k8s.CoreV1Api()
     try:
         v1.create_namespaced_service(namespace="default", body=service)
     except ApiException as e:
         logger.error(f"Failed to create Service: {e}")
     
-    create_mysql_exporter(name, secret_name)
+    # exporter
+    create_mysql_exporter(name, secret_name, body)
 
-    service = create_exporter_service(name)
+    # exporter svc
+    service = create_exporter_service(name, body)
     try:
         v1.create_namespaced_service(namespace="default", body=service)
     except ApiException as e:
         logger.error(f"Failed to create Exporter Service: {e}")
     
-    # Create the VMServiceScrape for the exporter
+    # vmss
     apps_v1 = k8s.CustomObjectsApi()
-    vm_service_scrape = create_vmservicescrape(name)
+    vm_service_scrape = create_vmservicescrape(name, namespace)
+    kopf.adopt(vm_service_scrape, owner=body)
     try:
         apps_v1.create_namespaced_custom_object(
             group="operator.victoriametrics.com",
             version="v1beta1",
-            namespace="monitoring-system",
+            namespace=namespace,
             plural="vmservicescrapes",
             body=vm_service_scrape
         )
     except ApiException as e:
         logger.error(f"Failed to create VMServiceScrape: {e}")
+
 
 @kopf.on.delete('dbaas.shamim.dev', 'v1', 'mysqls')
 def delete_mysql(spec, **kwargs):
@@ -79,10 +89,12 @@ def delete_mysql(spec, **kwargs):
     except ApiException as e:
         logger.error(f"Failed to delete PVC: {e}")
 
-    try:
-        v1.delete_namespaced_config_map(name + '-config', namespace="default")
-    except ApiException as e:
-        logger.error(f"Failed to delete ConfigMap: {e}")
+    config = spec.get('config', {})
+    if config:
+        try:
+            v1.delete_namespaced_config_map(name + '-config', namespace="default")
+        except ApiException as e:
+            logger.error(f"Failed to delete ConfigMap: {e}")
 
     try:
         v1.delete_namespaced_service(name, namespace="default")
@@ -112,7 +124,17 @@ def delete_mysql(spec, **kwargs):
     except ApiException as e:
         logger.error(f"Failed to delete VMServiceScrape: {e}")
 
-def create_exporter_service(name):
+def create_owner_reference(meta):
+    return [k8s.V1OwnerReference(
+        api_version=meta['apiVersion'],
+        kind=meta['kind'],
+        name=meta['name'],
+        uid=meta['uid'],
+        controller=True,
+        block_owner_deletion=True
+    )]
+
+def create_exporter_service(name, owner):
     service = k8s.V1Service(
         metadata=k8s.V1ObjectMeta(
             name=f"{name}-exporter",
@@ -128,15 +150,16 @@ def create_exporter_service(name):
             type="ClusterIP"
         )
     )
+    kopf.adopt(service, owner=owner)
     return service
 
-def create_vmservicescrape(name):
+def create_vmservicescrape(name, namespace):
     vm_service_scrape = {
         "apiVersion": "operator.victoriametrics.com/v1beta1",
         "kind": "VMServiceScrape",
         "metadata": {
             "name": f"{name}-exporter-scrape",
-            "namespace": "monitoring-system"
+            "namespace": f"{namespace}"
         },
         "spec": {
             "endpoints": [
@@ -155,22 +178,25 @@ def create_vmservicescrape(name):
             }
         }
     }
+
     return vm_service_scrape
 
-def create_mysql_configmap(name, config):
+
+def create_mysql_configmap(name, config, owner):
     v1 = k8s.CoreV1Api()
-    # Convert the config object into key-value pairs
+
     config_data = {"my.cnf": '\n'.join(f"{key}={value}" for key, value in config.items())}
     configmap = k8s.V1ConfigMap(
         metadata=k8s.V1ObjectMeta(name=f"{name}-config"),
         data=config_data
     )
+    kopf.adopt(configmap, owner=owner)
     try:
-        v1.create_namespaced_config_map(namespace="default", body=configmap)
+        cm = v1.create_namespaced_config_map(namespace="default", body=configmap)
     except ApiException as e:
         logger.error(f"Failed to create ConfigMap: {e}")
 
-def create_mysql_service(name):
+def create_mysql_service(name, owner):
     service = k8s.V1Service(
         metadata=k8s.V1ObjectMeta(name=name),
         spec=k8s.V1ServiceSpec(
@@ -178,6 +204,7 @@ def create_mysql_service(name):
             selector={"app": name}
         )
     )
+    kopf.adopt(service, owner=owner)
     return service
 
 def create_mysql_statefulset(name, spec, secret_name, config):
@@ -251,7 +278,7 @@ def create_mysql_statefulset(name, spec, secret_name, config):
         }
     }
 
-def create_mysql_pvc(name, spec):
+def create_mysql_pvc(name, spec, owner):
     v1 = k8s.CoreV1Api()
     pvc = k8s.V1PersistentVolumeClaim(
         metadata=k8s.V1ObjectMeta(name=f"{name}-pvc"),
@@ -265,13 +292,16 @@ def create_mysql_pvc(name, spec):
             storage_class_name='rawfile-localpv'
         )
     )
+    kopf.adopt(pvc, owner=owner)
     try:
-        v1.create_namespaced_persistent_volume_claim(namespace="default", body=pvc)
+        pvc = v1.create_namespaced_persistent_volume_claim(namespace="default", body=pvc)
+        return pvc
     except ApiException as e:
         logger.error(f"Failed to create PVC: {e}")
+        return None
 
 
-def create_mysql_exporter(name, secret_name):
+def create_mysql_exporter(name, secret_name, owner):
     v1 = k8s.AppsV1Api()
     exporter_deployment = k8s.V1Deployment(
         metadata=k8s.V1ObjectMeta(name=f"{name}-exporter", labels={"app": f"{name}-exporter"}),
@@ -310,6 +340,7 @@ def create_mysql_exporter(name, secret_name):
             )
         )
     )
+    kopf.adopt(exporter_deployment, owner=owner)
     try:
         v1.create_namespaced_deployment(namespace="default", body=exporter_deployment)
     except ApiException as e:
