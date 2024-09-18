@@ -73,7 +73,7 @@ def create_mysql(spec, body, namespace, **kwargs):
 
 
 @kopf.on.delete('dbaas.shamim.dev', 'v1', 'mysqls')
-def delete_mysql(spec, **kwargs):
+def delete_mysql(spec, namespace, **kwargs):
     name = kwargs['name']
     k8s_client = k8s.ApiClient()
     apps_v1 = k8s.AppsV1Api(k8s_client)
@@ -116,7 +116,7 @@ def delete_mysql(spec, **kwargs):
         crd_api.delete_namespaced_custom_object(
             group="operator.victoriametrics.com",
             version="v1beta1",
-            namespace="monitoring-system",
+            namespace=namespace,
             plural="vmservicescrapes",
             name=f"{name}-exporter-scrape"
         )
