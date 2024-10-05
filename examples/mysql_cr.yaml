@@ -1,13 +1,13 @@
 apiVersion: dbaas.shamim.dev/v1
 kind: MySQL
 metadata:
-  name: shamimmmmmm
+  name: shamimm
   namespace: default
 spec:
   resources:
-    storage: 1Gi
+    storage: 2Gi
     cpu: 100m
-    memory: 1Gi
+    memory: 500Mi
   image: hub.hamdocker.ir/mysql:8.0
   secretName: mysql-root-secret
   # config: 

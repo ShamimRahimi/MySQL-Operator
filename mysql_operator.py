@@ -1,14 +1,13 @@
 import kopf
+import kubernetes
 import kubernetes.config as k8s_config
 import kubernetes.client as k8s
 from kubernetes.client.rest import ApiException
 import logging
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Load Kubernetes configuration
 try:
     k8s_config.load_incluster_config()
     logger.info("Loaded in-cluster Kubernetes configuration")
@@ -345,3 +344,107 @@ def create_mysql_exporter(name, secret_name, owner):
         v1.create_namespaced_deployment(namespace="default", body=exporter_deployment)
     except ApiException as e:
         logger.error(f"Failed to create MySQL exporter deployment: {e}")
+
+def check_mysql_status(namespace, mysql_name):
+    api = kubernetes.client.CoreV1Api()
+
+    try:
+        pod = api.read_namespaced_pod(namespace=namespace, name=f"{mysql_name}-0")
+        pvc = api.read_namespaced_persistent_volume_claim(namespace=namespace, name=f"{mysql_name}-pvc")
+        if not pod or not pvc:
+            return "Pending", "No MySQL pod found.",  "No MySQL pvc found."
+
+        phase = pod.status.phase
+        try:
+            pvc_status = pvc.status.conditions[0].type
+        except Exception as e:
+            pvc_status = pvc.status.phase
+
+        if phase == "Running":
+            return "Running", "MySQL is running.", pvc_status
+        elif phase == "Pending":
+            return "Pending", "MySQL is pending.", pvc_status
+        elif phase == "Failed":
+            return "Failed", "MySQL pod has failed.", pvc_status
+        else:
+            return phase, f"MySQL pod is in {phase} state.", pvc_status
+
+    except Exception as e:
+        return "Unknown", str(e), str(e)
+
+@kopf.timer('dbaas.shamim.dev', 'v1', 'mysqls', interval=20.0)  
+def update_mysql_status(spec, status, namespace, name, **kwargs):
+    mysql_status, message, pvc_status = check_mysql_status(namespace, name)
+
+    if not status:
+        status = {}
+
+    return {
+        "status": {
+            "state": mysql_status,
+            "message": message,
+            "pvc-status": pvc_status
+        }
+    }
+
+
+def update_mysql_sts(namespace, mysql_name, cpu, memory):
+    apps_api = kubernetes.client.AppsV1Api()
+
+    try:
+        sts = apps_api.read_namespaced_stateful_set(name=mysql_name, namespace=namespace)
+
+        sts.spec.template.spec.containers[0].resources = kubernetes.client.V1ResourceRequirements(
+            limits={"cpu": cpu, "memory": memory},
+            requests={"cpu": cpu, "memory": memory}
+        )
+
+        apps_api.patch_namespaced_stateful_set(name=mysql_name, namespace=namespace, body=sts)
+        logging.info(f"MySQL deployment {mysql_name} updated with CPU: {cpu}, Memory: {memory}.")
+
+    except Exception as e:
+        logging.error(f"Failed to update MySQL deployment {mysql_name}: {str(e)}")
+
+
+@kopf.on.update('mysqls.dbaas.shamim.dev', field='spec')
+def on_update(spec, old, new, name, namespace, status, **kwargs):
+    original_spec = status.get('original_spec', {})
+
+    new_storage = int(new['resources']['storage'][0])
+    current_storage = int(old['resources']['storage'][0])
+
+    api = kubernetes.client.CustomObjectsApi()
+    if new_storage < current_storage:
+        mysql = api.get_namespaced_custom_object(
+            group="dbaas.shamim.dev",
+            version="v1",
+            namespace=namespace,
+            plural="mysqls",
+            name=name,
+        )
+        mysql['spec']['resources']['storage'] = f"{current_storage}Gi"
+        api.patch_namespaced_custom_object(
+            group="dbaas.shamim.dev",
+            version="v1",
+            namespace=namespace,
+            plural="mysqls",
+            name=name,
+            body=mysql
+            )
+        raise kopf.PermanentError(f"New storage size {new_storage} cannot be smaller than the current size {current_storage}.")
+
+
+    for field in original_spec:
+        if field != 'storage' and spec.get(field) != original_spec[field]:
+            raise kopf.PermanentError(f"Only storage changes are allowed. Other changes to '{field}' are not permitted.")
+
+    core_api = kubernetes.client.CoreV1Api()
+    pvc_name = f"{name}-pvc" 
+
+    try:
+        pvc = core_api.read_namespaced_persistent_volume_claim(name=pvc_name, namespace=namespace)
+        pvc.spec.resources.requests['storage'] = f"{new_storage}Gi"
+        core_api.patch_namespaced_persistent_volume_claim(pvc_name, namespace, body=pvc)
+
+    except ApiException as e:
+        raise kopf.PermanentError(f"Failed to update PVC: {str(e)}")

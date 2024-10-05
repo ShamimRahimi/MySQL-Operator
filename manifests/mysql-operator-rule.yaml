@@ -10,7 +10,7 @@ rules:
   resources: ["deployments", "statefulsets"]
   verbs: ["get", "list", "create", "delete", "update", "watch"]
 - apiGroups: ["dbaas.shamim.dev"]
-  resources: ["mysqls"]
+  resources: ["mysqls", "mysqls/status"]
   verbs: ["get", "list", "watch", "create", "delete", "update", "patch"]
 - apiGroups: ["operator.victoriametrics.com"]
   resources: ["vmservicescrapes"]
